@@ -1,9 +1,3 @@
-/**
- * 命令行实现：仅支持几个内建命令，同时支持加载外部命令执行
- *
- * 作者：李述铜
- * 联系邮箱: 527676163@qq.com
- */
 #ifndef CMD_H
 #define CMD_H
 
@@ -34,7 +28,7 @@ typedef struct _cli_t
     char curr_input[CLI_INPUT_SIZE]; // 当前输入缓存
     const cli_cmd_t *cmd_start;      // 命令起始
     const cli_cmd_t *cmd_end;        // 命令起始
-    const char *promote;             // 提示符
+    const char *promot;              // 提示符
 } cli_t;
 
 #endif

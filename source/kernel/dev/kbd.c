@@ -7,6 +7,12 @@
 
 static kbd_state_t kbd_state; // 键盘状态
 
+/**
+ * 键盘映射表，分3类
+ * normal是没有shift键按下，或者没有numlock按下时默认的键值
+ * func是按下shift或者numlock按下时的键值
+ * esc是以esc开头的的键值
+ */
 static const key_map_t map_table[256] = {
     [0x2] = {'1', '!'},
     [0x3] = {'2', '@'},
@@ -146,17 +152,20 @@ static void do_fx_key(int key)
  */
 static void do_normal_key(uint8_t raw_code)
 {
-    char key = get_key(raw_code);
+    char key = get_key(raw_code); // 去掉最高位
     int is_make = is_make_code(raw_code);
+
+    // 暂时只处理按键按下
     switch (key)
     {
+        // shift, alt, ctrl键，记录标志位
     case KEY_RSHIFT:
-        kbd_state.rshift_press = is_make;
+        kbd_state.rshift_press = is_make; // 仅设置标志位
         break;
     case KEY_LSHIFT:
-        kbd_state.lshift_press = is_make;
+        kbd_state.lshift_press = is_make; // 仅设置标志位
         break;
-    case KEY_CAPS:
+    case KEY_CAPS: // 大小写键，设置大小写状态
         if (is_make)
         {
             kbd_state.caps_lock = ~kbd_state.caps_lock;
@@ -164,11 +173,12 @@ static void do_normal_key(uint8_t raw_code)
         }
         break;
     case KEY_ALT:
-        kbd_state.lalt_press = is_make;
+        kbd_state.lalt_press = is_make; // 仅设置标志位
         break;
     case KEY_CTRL:
-        kbd_state.lctrl_press = is_make;
+        kbd_state.lctrl_press = is_make; // 仅设置标志位
         break;
+    // 功能键：写入键盘缓冲区，由应用自行决定如何处理
     case KEY_F1:
     case KEY_F2:
     case KEY_F3:
@@ -187,46 +197,56 @@ static void do_normal_key(uint8_t raw_code)
     default:
         if (is_make)
         {
-
+            // 根据shift控制取相应的字符，这里有进行大小写转换或者shif转换
             if (kbd_state.rshift_press || kbd_state.lshift_press)
             {
-                key = map_table[key].func;
+                key = map_table[key].func; // 第2功能
             }
             else
             {
-                key = map_table[key].normal;
+                key = map_table[key].normal; // 第1功能
             }
+
+            // 根据caps再进行一次字母的大小写转换
             if (kbd_state.caps_lock)
             {
                 if ((key >= 'A') && (key <= 'Z'))
                 {
-
+                    // 大写转小写
                     key = key - 'A' + 'a';
                 }
                 else if ((key >= 'a') && (key <= 'z'))
                 {
-
+                    // 小写转大小
                     key = key - 'a' + 'A';
                 }
             }
 
+            // 最后，不管是否是控制字符，都会被写入
+            // log_printf("key=%c", key);
             tty_in(key);
         }
         break;
     }
 }
 
+/**
+ * E0开始的键处理，只处理功能键，其它更长的序列不处理
+ */
 static void do_e0_key(uint8_t raw_code)
 {
-    int key = get_key(raw_code);
-    int is_make = is_make_code(raw_code);
+    int key = get_key(raw_code);          // 去掉最高位
+    int is_make = is_make_code(raw_code); // 按下或释放
+
+    // E0开头，主要是HOME、END、光标移动等功能键
+    // 设置一下光标位置，然后直接写入
     switch (key)
     {
-    case KEY_CTRL:
-        kbd_state.rctrl_press = is_make;
+    case KEY_CTRL:                       // 右ctrl和左ctrl都是这个值
+        kbd_state.rctrl_press = is_make; // 仅设置标志位
         break;
     case KEY_ALT:
-        kbd_state.ralt_press = is_make;
+        kbd_state.ralt_press = is_make; // 仅设置标志位
         break;
     }
 }
@@ -237,11 +257,12 @@ static void do_e0_key(uint8_t raw_code)
 void do_handler_kbd(exception_frame_t *frame)
 {
     static enum {
-        NORMAL,
-        BEGIN_E0,
-        BEGIN_E1,
+        NORMAL,   // 普通，无e0或e1
+        BEGIN_E0, // 收到e0字符
+        BEGIN_E1, // 收到e1字符
     } recv_state = NORMAL;
 
+    // 检查是否有数据，无数据则退出
     uint8_t status = inb(KBD_PORT_STAT);
     if (!(status & KBD_STAT_RECV_READY))
     {
@@ -249,15 +270,24 @@ void do_handler_kbd(exception_frame_t *frame)
         return;
     }
 
+    // 读取键值
     uint8_t raw_code = inb(KBD_PORT_DATA);
 
+    // 读取完成之后，就可以发EOI，方便后续继续响应键盘中断
+    // 否则,键值的处理过程可能略长，将导致中断响应延迟
     pic_send_eoi(IRQ1_KEYBOARD);
+
+    // 实测qemu下收不到E0和E1，估计是没有发出去
+    // 方向键、HOME/END等键码和小键盘上发出来的完全一样。不清楚原因
+    // 也许是键盘布局的问题？所以，这里就忽略小键盘？
     if (raw_code == KEY_E0)
     {
+        // E0字符
         recv_state = BEGIN_E0;
     }
     else if (raw_code == KEY_E1)
     {
+        // E1字符，不处理
         recv_state = BEGIN_E1;
     }
     else
@@ -267,11 +297,11 @@ void do_handler_kbd(exception_frame_t *frame)
         case NORMAL:
             do_normal_key(raw_code);
             break;
-        case BEGIN_E0:
+        case BEGIN_E0: // 不处理print scr
             do_e0_key(raw_code);
             recv_state = NORMAL;
             break;
-        case BEGIN_E1:
+        case BEGIN_E1: // 不处理pause
             recv_state = NORMAL;
             break;
         }

@@ -25,10 +25,14 @@ int strings_count(char **start)
 char *get_file_name(char *name)
 {
     char *s = name;
+
+    // 定位到结束符
     while (*s != '\0')
     {
         s++;
     }
+
+    // 反向搜索，直到找到反斜杆或者到文件开头
     while ((*s != '\\') && (*s != '/') && (s >= name))
     {
         s--;
@@ -94,6 +98,7 @@ int kernel_strlen(const char *str)
 
 /**
  * 比较两个字符串，最多比较size个字符
+ * 如果某一字符串提前比较完成，也算相同
  */
 int kernel_strncmp(const char *s1, const char *s2, int size)
 {
@@ -101,6 +106,8 @@ int kernel_strncmp(const char *s1, const char *s2, int size)
     {
         return -1;
     }
+
+    // 2023-3-18 这里size没有用到
     while (*s1 && *s2 && (*s1 == *s2) && size)
     {
         s1++;
@@ -162,16 +169,19 @@ int kernel_memcmp(void *d1, void *d2, int size)
 
 void kernel_itoa(char *buf, int num, int base)
 {
+    // 转换字符索引[-15, -14, ...-1, 0, 1, ...., 14, 15]
     static const char *num2ch = {"FEDCBA9876543210123456789ABCDEF"};
     char *p = buf;
     int old_num = num;
 
+    // 仅支持部分进制
     if ((base != 2) && (base != 8) && (base != 10) && (base != 16))
     {
         *p = '\0';
         return;
     }
 
+    // 只支持十进制负数
     int signed_num = 0;
     if ((num < 0) && (base == 10))
     {
@@ -200,6 +210,7 @@ void kernel_itoa(char *buf, int num, int base)
     }
     *p-- = '\0';
 
+    // 将转换结果逆序，生成最终的结果
     char *start = (!signed_num) ? buf : buf + 1;
     while (start < p)
     {
@@ -238,6 +249,7 @@ void kernel_vsprintf(char *buffer, const char *fmt, va_list args)
     {
         switch (state)
         {
+        // 普通字符
         case NORMAL:
             if (ch == '%')
             {
@@ -248,6 +260,7 @@ void kernel_vsprintf(char *buffer, const char *fmt, va_list args)
                 *curr++ = ch;
             }
             break;
+        // 格式化控制字符，只支持部分
         case READ_FMT:
             if (ch == 'd')
             {

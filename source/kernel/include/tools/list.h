@@ -1,12 +1,17 @@
 #ifndef LIST_H
 #define LIST_H
 
+// 已知结构体中的某个字段的指针，求所在结构体的指针
 #define offset_in_parent(parent_type, node_name) \
-    ((uint32_t) & (((parent_type *)0)->node_name))
+    ((uint32_t)&(((parent_type *)0)->node_name))
 
+// 2.求node所在的结构体首址：node的地址 - node的偏移
+// 即已知a->node的地址，求a的地址
 #define offset_to_parent(node, parent_type, node_name) \
     ((uint32_t)node - offset_in_parent(parent_type, node_name))
 
+// 3. 进行转换: (struct aa *)addr
+// list_node_parent(node_addr, struct aa, node_name)
 #define list_node_parent(node, parent_type, node_name) \
     ((parent_type *)(node ? offset_to_parent((node), parent_type, node_name) : 0))
 

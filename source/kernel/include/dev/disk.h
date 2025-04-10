@@ -11,6 +11,8 @@
 #define DISK_PRIMARY_PART_CNT (4 + 1) // 主分区数量最多才4个
 #define DISK_PER_CHANNEL 2            // 每通道磁盘数量
 
+// https://wiki.osdev.org/ATA_PIO_Mode#IDENTIFY_command
+// 只考虑支持主总结primary bus
 #define IOBASE_PRIMARY 0x1F0
 #define DISK_DATA(disk) (disk->port_base + 0)         // 数据寄存器
 #define DISK_ERROR(disk) (disk->port_base + 1)        // 错误寄存器
@@ -78,6 +80,7 @@ typedef struct _partinfo_t
     char name[PART_NAME_SIZE]; // 分区名称
     struct _disk_t *disk;      // 所属的磁盘
 
+    // https://www.win.tue.nl/~aeb/partitions/partition_types-1.html
     enum
     {
         FS_INVALID = 0x00, // 无效文件系统类型

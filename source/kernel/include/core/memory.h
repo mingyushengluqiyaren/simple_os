@@ -39,17 +39,6 @@ typedef struct _memory_map_t
     uint32_t perm; // 访问权限
 } memory_map_t;
 
-/**
- * @brief 内存池结构
- */
-typedef struct _mempool_t
-{
-    int block_size; // 内存块的大小
-    int free_count; // 当前可用的内存块数量
-    char *free_ptr; // 指向当前可用内存块的指针
-    char *mem;      // 指向内存池起始位置的指针
-} mempool_t;
-
 void memory_init(boot_info_t *boot_info);
 uint32_t memory_create_uvm(void);
 uint32_t memory_alloc_for_page_dir(uint32_t page_dir, uint32_t vaddr, uint32_t size, int perm);
@@ -61,7 +50,5 @@ uint32_t memory_copy_uvm(uint32_t page_dir);
 uint32_t memory_get_paddr(uint32_t page_dir, uint32_t vaddr);
 int memory_copy_uvm_data(uint32_t to, uint32_t page_dir, uint32_t from, uint32_t size);
 char *sys_sbrk(int incr);
-
-void alloc_mem(void);
 
 #endif // MEMORY_H

@@ -10,6 +10,7 @@
  */
 typedef struct _boot_info_t
 {
+    // RAM区信息
     struct
     {
         uint32_t start;

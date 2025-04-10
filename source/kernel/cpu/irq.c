@@ -45,6 +45,8 @@ static void do_default_handler(exception_frame_t *frame, const char *message)
     log_printf("IRQ/Exception happend: %s.", message);
     dump_core_regs(frame);
 
+    // todo: 留等以后补充打印任务栈的内容
+
     log_printf("--------------------------------");
     if (frame->cs & 0x3)
     {

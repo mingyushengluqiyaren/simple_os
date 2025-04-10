@@ -24,6 +24,7 @@ void sem_wait(sem_t *sem)
     }
     else
     {
+        // 从就绪队列中移除，然后加入信号量的等待队列
         task_t *curr = task_current();
         task_set_block(curr);
         list_insert_last(&sem->wait_list, &curr->wait_node);
@@ -42,6 +43,7 @@ void sem_notify(sem_t *sem)
 
     if (list_count(&sem->wait_list))
     {
+        // 有进程等待，则唤醒加入就绪队列
         list_node_t *node = list_remove_first(&sem->wait_list);
         task_t *task = list_node_parent(node, task_t, wait_node);
         task_set_ready(task);

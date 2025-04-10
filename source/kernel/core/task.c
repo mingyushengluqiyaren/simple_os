@@ -893,4 +893,14 @@ int sys_ps(int status)
             node = node->next;
         }
     }
+    else if (status == 2)
+    {
+        list_node_t *node = task_manager.sleep_list.first;
+        while (node)
+        {
+            task_t *task = list_node_parent(node, task_t, wait_node);
+            log_printf("sleeping task name: %s, pid: %d, state: %d\n", task->name, task->pid, task->state);
+            node = node->next;
+        }
+    }
 }

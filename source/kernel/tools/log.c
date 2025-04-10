@@ -7,6 +7,8 @@
 #include "ipc/mutex.h"
 #include "dev/console.h"
 #include "dev/dev.h"
+
+// 目标用串口，参考资料：https://wiki.osdev.org/Serial_Ports
 #define LOG_USE_COM 0
 #define COM1_PORT 0x3F8 // RS232端口0初始化
 
@@ -49,6 +51,9 @@ void log_printf(const char *fmt, ...)
     va_start(args, fmt);
     kernel_vsprintf(str_buf, fmt, args);
     va_end(args);
+
+    // 显示，如果发送速度太慢，会造成这里关中断太长时间
+    // 所以，这里这样做不是好办法
     mutex_lock(&mutex);
 
 #if LOG_USE_COM
@@ -63,8 +68,12 @@ void log_printf(const char *fmt, ...)
     outb(COM1_PORT, '\r');
     outb(COM1_PORT, '\n');
 #else
+    // console_write(0, str_buf, kernel_strlen(str_buf));
+    dev_write(log_dev_id, 0, "log:", 4);
     dev_write(log_dev_id, 0, str_buf, kernel_strlen(str_buf));
+
     char c = '\n';
+    // console_write(0, &c, 1);
     dev_write(log_dev_id, 0, &c, 1);
 
 #endif

@@ -51,6 +51,8 @@ typedef struct _fs_t
 
     list_node_t node; // 下一结点
 
+    // 目前暂时这样设计，可能看起来不好，但是是最简单的方法
+    // 这样就不用考虑内存分配的问题
     union
     {
         fat_t fat_data; // 文件系统相关数据

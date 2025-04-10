@@ -35,7 +35,7 @@ static int bwrite_secotr(fat_t *fat, int sector)
 }
 
 /**
- * 检查指定簇是否可用
+ * 检查指定簇是否可用，非占用或坏簇
  */
 int cluster_is_valid(cluster_t cluster)
 {
@@ -51,6 +51,8 @@ int cluster_get_next(fat_t *fat, cluster_t curr)
     {
         return FAT_CLUSTER_INVALID;
     }
+
+    // 取fat表中的扇区号和在扇区中的偏移
     int offset = curr * sizeof(cluster_t);
     int sector = offset / fat->bytes_per_sec;
     int off_sector = offset % fat->bytes_per_sec;
@@ -59,6 +61,8 @@ int cluster_get_next(fat_t *fat, cluster_t curr)
         log_printf("cluster too big. %d", curr);
         return FAT_CLUSTER_INVALID;
     }
+
+    // 读扇区，然后取其中簇数据
     int err = bread_sector(fat, fat->tbl_start + sector);
     if (err < 0)
     {
@@ -86,12 +90,18 @@ int cluster_set_next(fat_t *fat, cluster_t curr, cluster_t next)
         log_printf("cluster too big. %d", curr);
         return -1;
     }
+
+    // 读缓存
     int err = bread_sector(fat, fat->tbl_start + sector);
     if (err < 0)
     {
         return -1;
     }
+
+    // 改next
     *(cluster_t *)(fat->fat_buffer + off_sector) = next;
+
+    // 回写到多个表中
     for (int i = 0; i < fat->tbl_cnt; i++)
     {
         err = bwrite_secotr(fat, fat->tbl_start + sector);
@@ -137,8 +147,11 @@ cluster_t cluster_alloc_free(fat_t *fat, int cnt)
             {
                 start = curr;
             }
+
+            // 前一簇如果有效，则设置。否则忽略掉
             if (cluster_is_valid(pre))
             {
+                // 找到空表项，设置前一表项的链接
                 int err = cluster_set_next(fat, pre, curr);
                 if (err < 0)
                 {
@@ -161,16 +174,20 @@ cluster_t cluster_alloc_free(fat_t *fat, int cnt)
             return start;
         }
     }
+
+    // 失败，空间不够等问题
     cluster_free_chain(fat, start);
     return FAT_CLUSTER_INVALID;
 }
 
 /**
- * @brief 转换文件名为diritem中的短文件名
+ * @brief 转换文件名为diritem中的短文件名，如a.txt 转换成a      txt
  */
 static void to_sfn(char *dest, const char *src)
 {
     kernel_memset(dest, ' ', SFN_LEN);
+
+    // 不断生成直到遇到分隔符和写完缓存
     char *curr = dest;
     char *end = dest + SFN_LEN;
     while (*src && (curr < end))
@@ -179,7 +196,7 @@ static void to_sfn(char *dest, const char *src)
 
         switch (c)
         {
-        case '.':
+        case '.': // 隔附，跳到扩展名区，不写字符
             curr = dest + 8;
             break;
         default:
@@ -214,6 +231,8 @@ int diritem_init(diritem_t *item, uint8_t attr, const char *name)
     item->DIR_FileSize = 0;
     item->DIR_Attr = attr;
     item->DIR_NTRes = 0;
+
+    // 时间写固定值，简单方便
     item->DIR_CrtTime = 0;
     item->DIR_CrtDate = 0;
     item->DIR_WrtTime = item->DIR_CrtTime;
@@ -230,7 +249,7 @@ void diritem_get_name(diritem_t *item, char *dest)
     char *c = dest;
     char *ext = (char *)0;
 
-    kernel_memset(dest, 0, SFN_LEN + 1);
+    kernel_memset(dest, 0, SFN_LEN + 1); // 最多11个字符
     for (int i = 0; i < 11; i++)
     {
         if (item->DIR_Name[i] != ' ')
@@ -244,6 +263,8 @@ void diritem_get_name(diritem_t *item, char *dest)
             *c++ = '.';
         }
     }
+
+    // 没有扩展名的情况
     if (ext && (ext[1] == '\0'))
     {
         ext[0] = '\0';
@@ -256,6 +277,8 @@ void diritem_get_name(diritem_t *item, char *dest)
 file_type_t diritem_get_type(diritem_t *item)
 {
     file_type_t type = FILE_UNKNOWN;
+
+    // 长文件名和volum id
     if (item->DIR_Attr & (DIRITEM_ATTR_VOLUME_ID | DIRITEM_ATTR_HIDDEN | DIRITEM_ATTR_SYSTEM))
     {
         return FILE_UNKNOWN;
@@ -305,7 +328,7 @@ static int write_dir_entry(fat_t *fat, diritem_t *item, int index)
 }
 
 /**
- * @brief 更改文件大小
+ * @brief 更改文件大小, 此时当前族号已经到达了最后的簇号
  */
 static int expand_file(file_t *file, int inc_bytes)
 {
@@ -314,21 +337,22 @@ static int expand_file(file_t *file, int inc_bytes)
     int cluster_cnt;
     if ((file->size == 0) || (file->size % fat->cluster_byte_size == 0))
     {
+        // 文件为空，或者刚好达到的簇的末尾
         cluster_cnt = up2(inc_bytes, fat->cluster_byte_size) / fat->cluster_byte_size;
     }
     else
     {
+        // 文件非空，当前簇的空闲量，如果空间够增长，则直接退出了
+        // 例如：大小为2048，再扩充1024,簇大小为1024
         int cfree = fat->cluster_byte_size - (file->size % fat->cluster_byte_size);
-        if (cfree > inc_bytes)
+        if (cfree >= inc_bytes)
         {
+            file->size += inc_bytes;
             return 0;
         }
 
+        // 不够，则分配新簇用来放额外的空间
         cluster_cnt = up2(inc_bytes - cfree, fat->cluster_byte_size) / fat->cluster_byte_size;
-        if (cluster_cnt == 0)
-        {
-            cluster_cnt = 1;
-        }
     }
 
     cluster_t start = cluster_alloc_free(fat, cluster_cnt);
@@ -337,12 +361,15 @@ static int expand_file(file_t *file, int inc_bytes)
         log_printf("no cluster for file write");
         return -1;
     }
+
+    // 在文件关闭时，回写
     if (!cluster_is_valid(file->sblk))
     {
         file->cblk = file->sblk = start;
     }
     else
     {
+        // 建立链接关系
         int err = cluster_set_next(fat, file->cblk, start);
         if (err < 0)
         {
@@ -359,6 +386,8 @@ static int expand_file(file_t *file, int inc_bytes)
 static int move_file_pos(file_t *file, fat_t *fat, uint32_t move_bytes, int expand)
 {
     uint32_t c_offset = file->pos % fat->cluster_byte_size;
+
+    // 跨簇，则调整curr_cluster。注意，如果已经是最后一个簇了，则curr_cluster不会调整
     if (c_offset + move_bytes >= fat->cluster_byte_size)
     {
         cluster_t next = cluster_get_next(fat, file->cblk);
@@ -385,12 +414,15 @@ static int move_file_pos(file_t *file, fat_t *fat, uint32_t move_bytes, int expa
  */
 int fatfs_mount(struct _fs_t *fs, int dev_major, int dev_minor)
 {
+    // 打开设备
     int dev_id = dev_open(dev_major, dev_minor, (void *)0);
     if (dev_id < 0)
     {
         log_printf("open disk failed. major: %x, minor: %x", dev_major, dev_minor);
         return -1;
     }
+
+    // 读取dbr扇区并进行检查
     dbr_t *dbr = (dbr_t *)memory_alloc_page();
     if (!dbr)
     {
@@ -398,6 +430,7 @@ int fatfs_mount(struct _fs_t *fs, int dev_major, int dev_minor)
         goto mount_failed;
     }
 
+    // 这里需要使用查询的方式来读取，因为此时多进程还没有跑起来，只在初始化阶段？
     int cnt = dev_read(dev_id, 0, (char *)dbr, 1);
     if (cnt < 1)
     {
@@ -405,6 +438,7 @@ int fatfs_mount(struct _fs_t *fs, int dev_major, int dev_minor)
         goto mount_failed;
     }
 
+    // 解析DBR参数，解析出有用的参数
     fat_t *fat = &fs->fat_data;
     fat->fat_buffer = (uint8_t *)dbr;
     fat->bytes_per_sec = dbr->BPB_BytsPerSec;
@@ -418,6 +452,10 @@ int fatfs_mount(struct _fs_t *fs, int dev_major, int dev_minor)
     fat->data_start = fat->root_start + fat->root_ent_cnt * 32 / SECTOR_SIZE;
     fat->curr_sector = -1;
     fat->fs = fs;
+    mutex_init(&fat->mutex);
+    fs->mutex = &fat->mutex;
+
+    // 简单检查是否是fat16文件系统, 可以在下边做进一步的更多检查。此处只检查做一点点检查
     if (fat->tbl_cnt != 2)
     {
         log_printf("fat table num error, major: %x, minor: %x", dev_major, dev_minor);
@@ -429,6 +467,8 @@ int fatfs_mount(struct _fs_t *fs, int dev_major, int dev_minor)
         log_printf("not a fat16 file system, major: %x, minor: %x", dev_major, dev_minor);
         goto mount_failed;
     }
+
+    // 记录相关的打开信息
     fs->type = FS_FAT16;
     fs->data = &fs->fat_data;
     fs->dev_id = dev_id;
@@ -475,6 +515,8 @@ int fatfs_open(struct _fs_t *fs, const char *path, file_t *file)
     fat_t *fat = (fat_t *)fs->data;
     diritem_t *file_item = (diritem_t *)0;
     int p_index = -1;
+
+    // 遍历根目录的数据区，找到已经存在的匹配项
     for (int i = 0; i < fat->root_ent_cnt; i++)
     {
         diritem_t *item = read_dir_entry(fat, i);
@@ -482,16 +524,22 @@ int fatfs_open(struct _fs_t *fs, const char *path, file_t *file)
         {
             return -1;
         }
+
+        // 结束项，不需要再扫描了，同时index也不能往前走
         if (item->DIR_Name[0] == DIRITEM_NAME_END)
         {
             p_index = i;
             break;
         }
+
+        // 只显示普通文件和目录，其它的不显示
         if (item->DIR_Name[0] == DIRITEM_NAME_FREE)
         {
             p_index = i;
             continue;
         }
+
+        // 找到要打开的目录
         if (diritem_name_match(item, path))
         {
             file_item = item;
@@ -503,6 +551,8 @@ int fatfs_open(struct _fs_t *fs, const char *path, file_t *file)
     if (file_item)
     {
         read_from_diritem(fat, file, file_item, p_index);
+
+        // 如果要截断，则清空
         if (file->mode & O_TRUNC)
         {
             cluster_free_chain(fat, file->sblk);
@@ -513,6 +563,7 @@ int fatfs_open(struct _fs_t *fs, const char *path, file_t *file)
     }
     else if ((file->mode & O_CREAT) && (p_index >= 0))
     {
+        // 创建一个空闲的diritem项
         diritem_t item;
         diritem_init(&item, 0, path);
         int err = write_dir_entry(fat, &item, p_index);
@@ -535,6 +586,8 @@ int fatfs_open(struct _fs_t *fs, const char *path, file_t *file)
 int fatfs_read(char *buf, int size, file_t *file)
 {
     fat_t *fat = (fat_t *)file->fs->data;
+
+    // 调整读取量，不要超过文件总量
     uint32_t nbytes = size;
     if (file->pos + nbytes > file->size)
     {
@@ -546,7 +599,9 @@ int fatfs_read(char *buf, int size, file_t *file)
     {
         uint32_t curr_read = nbytes;
         uint32_t cluster_offset = file->pos % fat->cluster_byte_size;
-        uint32_t start_sector = fat->data_start + (file->cblk - 2) * fat->sec_per_cluster;
+        uint32_t start_sector = fat->data_start + (file->cblk - 2) * fat->sec_per_cluster; // 从2开始
+
+        // 如果是整簇, 只读一簇
         if ((cluster_offset == 0) && (nbytes == fat->cluster_byte_size))
         {
             int err = dev_read(fat->fs->dev_id, start_sector, buf, fat->sec_per_cluster);
@@ -559,10 +614,13 @@ int fatfs_read(char *buf, int size, file_t *file)
         }
         else
         {
+            // 如果跨簇，只读第一个簇内的一部分
             if (cluster_offset + curr_read > fat->cluster_byte_size)
             {
                 curr_read = fat->cluster_byte_size - cluster_offset;
             }
+
+            // 读取整个簇，然后从中拷贝
             fat->curr_sector = -1;
             int err = dev_read(fat->fs->dev_id, start_sector, fat->fat_buffer, fat->sec_per_cluster);
             if (err < 0)
@@ -575,6 +633,8 @@ int fatfs_read(char *buf, int size, file_t *file)
         buf += curr_read;
         nbytes -= curr_read;
         total_read += curr_read;
+
+        // 前移文件指针
         int err = move_file_pos(file, fat, curr_read, 0);
         if (err < 0)
         {
@@ -591,6 +651,8 @@ int fatfs_read(char *buf, int size, file_t *file)
 int fatfs_write(char *buf, int size, file_t *file)
 {
     fat_t *fat = (fat_t *)file->fs->data;
+
+    // 如果文件大小不够，则先扩展文件大小
     if (file->pos + size > file->size)
     {
         int inc_size = file->pos + size - file->size;
@@ -605,9 +667,12 @@ int fatfs_write(char *buf, int size, file_t *file)
     uint32_t total_write = 0;
     while (nbytes)
     {
+        // 每次写的数据量取决于当前簇中剩余的空间，以及size的量综合
         uint32_t curr_write = nbytes;
         uint32_t cluster_offset = file->pos % fat->cluster_byte_size;
-        uint32_t start_sector = fat->data_start + (file->cblk - 2) * fat->sec_per_cluster;
+        uint32_t start_sector = fat->data_start + (file->cblk - 2) * fat->sec_per_cluster; // 从2开始
+
+        // 如果是整簇, 写整簇
         if ((cluster_offset == 0) && (nbytes == fat->cluster_byte_size))
         {
             int err = dev_write(fat->fs->dev_id, start_sector, buf, fat->sec_per_cluster);
@@ -620,6 +685,7 @@ int fatfs_write(char *buf, int size, file_t *file)
         }
         else
         {
+            // 如果跨簇，只写第一个簇内的一部分
             if (cluster_offset + curr_write > fat->cluster_byte_size)
             {
                 curr_write = fat->cluster_byte_size - cluster_offset;
@@ -632,6 +698,8 @@ int fatfs_write(char *buf, int size, file_t *file)
                 return total_write;
             }
             kernel_memcpy(fat->fat_buffer + cluster_offset, buf, curr_write);
+
+            // 写整个簇，然后从中拷贝
             err = dev_write(fat->fs->dev_id, start_sector, fat->fat_buffer, fat->sec_per_cluster);
             if (err < 0)
             {
@@ -643,6 +711,8 @@ int fatfs_write(char *buf, int size, file_t *file)
         nbytes -= curr_write;
         total_write += curr_write;
         file->size += curr_write;
+
+        // 前移文件指针
         int err = move_file_pos(file, fat, curr_write, 1);
         if (err < 0)
         {
@@ -682,6 +752,7 @@ void fatfs_close(file_t *file)
  */
 int fatfs_seek(file_t *file, uint32_t offset, int dir)
 {
+    // 只支持基于文件开头的定位
     if (dir != 0)
     {
         return -1;
@@ -696,20 +767,28 @@ int fatfs_seek(file_t *file, uint32_t offset, int dir)
     {
         uint32_t c_off = curr_pos % fat->cluster_byte_size;
         uint32_t curr_move = offset_to_move;
+
+        // 不超过一簇，直接调整位置，无需跑到下一簇
         if (c_off + curr_move < fat->cluster_byte_size)
         {
             curr_pos += curr_move;
             break;
         }
+
+        // 超过一簇，只在当前簇内移动
         curr_move = fat->cluster_byte_size - c_off;
         curr_pos += curr_move;
         offset_to_move -= curr_move;
+
+        // 取下一簇
         curr_cluster = cluster_get_next(fat, curr_cluster);
         if (!cluster_is_valid(curr_cluster))
         {
             return -1;
         }
     }
+
+    // 最后记录一下位置
     file->pos = curr_pos;
     file->cblk = curr_cluster;
     return 0;
@@ -735,6 +814,8 @@ int fatfs_opendir(struct _fs_t *fs, const char *name, DIR *dir)
 int fatfs_readdir(struct _fs_t *fs, DIR *dir, struct dirent *dirent)
 {
     fat_t *fat = (fat_t *)fs->data;
+
+    // 做一些简单的判断，检查
     while (dir->index < fat->root_ent_cnt)
     {
         diritem_t *item = read_dir_entry(fat, dir->index);
@@ -742,10 +823,14 @@ int fatfs_readdir(struct _fs_t *fs, DIR *dir, struct dirent *dirent)
         {
             return -1;
         }
+
+        // 结束项，不需要再扫描了，同时index也不能往前走
         if (item->DIR_Name[0] == DIRITEM_NAME_END)
         {
             break;
         }
+
+        // 只显示普通文件和目录，其它的不显示
         if (item->DIR_Name[0] != DIRITEM_NAME_FREE)
         {
             file_type_t type = diritem_get_type(item);
@@ -779,6 +864,8 @@ int fatfs_closedir(struct _fs_t *fs, DIR *dir)
 int fatfs_unlink(struct _fs_t *fs, const char *path)
 {
     fat_t *fat = (fat_t *)fs->data;
+
+    // 遍历根目录的数据区，找到已经存在的匹配项
     for (int i = 0; i < fat->root_ent_cnt; i++)
     {
         diritem_t *item = read_dir_entry(fat, i);
@@ -786,18 +873,27 @@ int fatfs_unlink(struct _fs_t *fs, const char *path)
         {
             return -1;
         }
+
+        // 结束项，不需要再扫描了，同时index也不能往前走
         if (item->DIR_Name[0] == DIRITEM_NAME_END)
         {
             break;
         }
+
+        // 只显示普通文件和目录，其它的不显示
         if (item->DIR_Name[0] == DIRITEM_NAME_FREE)
         {
             continue;
         }
+
+        // 找到要打开的目录
         if (diritem_name_match(item, path))
         {
+            // 释放簇
             int cluster = (item->DIR_FstClusHI << 16) | item->DIR_FstClusL0;
             cluster_free_chain(fat, cluster);
+
+            // 写diritem项
             diritem_t item;
             kernel_memset(&item, 0, sizeof(diritem_t));
             return write_dir_entry(fat, &item, i);

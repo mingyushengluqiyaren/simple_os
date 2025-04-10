@@ -10,6 +10,10 @@ static inline int sys_call(syscall_args_t *args)
 {
     const unsigned long sys_gate_addr[] = {0, SELECTOR_SYSCALL | 0}; // 使用特权级0
     int ret;
+
+    // 采用调用门, 这里只支持5个参数
+    // 用调用门的好处是会自动将参数复制到内核栈中，这样内核代码很好取参数
+    // 而如果采用寄存器传递，取参比较困难，需要先压栈再取
     __asm__ __volatile__(
         "push %[arg3]\n\t"
         "push %[arg2]\n\t"

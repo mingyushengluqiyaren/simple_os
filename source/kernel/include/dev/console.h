@@ -5,6 +5,7 @@
 #include "dev/tty.h"
 #include "ipc/mutex.h"
 
+// https://wiki.osdev.org/Printing_To_Screen
 #define CONSOLE_VIDEO_BASE 0xb8000 // 控制台显存起始地址,共32KB
 #define CONSOLE_DISP_ADDR 0xb8000
 #define CONSOLE_DISP_END (0xb8000 + 32 * 1024) // 显存的结束地址
@@ -80,4 +81,5 @@ int console_init(int idx);
 int console_write(tty_t *tty);
 void console_close(int dev);
 void console_select(int idx);
-#endif
+void console_set_cursor(int idx, int visiable);
+#endif /* SRC_UI_TTY_WIDGET_H_ */

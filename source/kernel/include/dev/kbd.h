@@ -3,6 +3,7 @@
 
 #include "comm/types.h"
 
+// https://wiki.osdev.org/%228042%22_PS/2_Controller
 #define KBD_PORT_DATA 0x60
 #define KBD_PORT_STAT 0x64
 #define KBD_PORT_CMD 0x64
@@ -10,6 +11,7 @@
 #define KBD_STAT_RECV_READY (1 << 0)
 #define KBD_STAT_SEND_FULL (1 << 1)
 
+// https://wiki.osdev.org/PS/2_Keyboard
 #define KBD_CMD_RW_LED 0xED // 写按键
 
 #define KEY_RSHIFT 0x36
@@ -58,6 +60,12 @@
 
 #define KEY_BACKSPACE 0xE
 
+/**
+ * 键盘扫描码表单元类型
+ * 每个按键至多有两个功能键值
+ * code1：无shift按下或numlock灯亮的值，即缺省的值
+ * code2：shift按下或者number灯灭的值，即附加功能值
+ */
 typedef struct _key_map_t
 {
     uint8_t normal; // 普通功能
